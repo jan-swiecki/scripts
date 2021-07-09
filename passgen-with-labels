@@ -1,0 +1,44 @@
+#!/bin/bash
+
+if [ -z "$1" ]; then
+  cat<<EOF
+usage: passgen-with-labels <entropy_bits>
+
+entropy_bits         bits of entropy for the password
+EOF
+  exit
+fi
+
+entropy="$1"
+
+echo "Password list with ${entropy} bits of entropy"
+echo
+cat <<EOF >&2
+Input each password after 'label> ' prompt.
+
+After you provide label password will be printed in '\$password  \$label' format.
+
+In order to finish provide empty label.
+
+You can redirect stdout directly to lpr.
+
+
+EOF
+
+while [ 1 ]; do
+  read -p 'label> ' label
+
+  if [ "$label" == "" ]; then
+    break
+  fi
+
+  while [ 1 ]; do
+    password="$(cat /dev/urandom | head -c "$((entropy/8))" | base64)"
+    if [ "$password" == "${password/+/}" ]; then
+      break
+    fi
+  done
+
+  echo "$password  $label"
+  echo
+done

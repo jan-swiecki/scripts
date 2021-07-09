@@ -1,0 +1,19 @@
+#!/bin/bash
+
+if [ -z "$1" ]; then
+  cat<<EOF
+usage: passgen <entropy_bits> [<number_of_passwords>]
+
+entropy_bits         bits of entropy for the password
+number_of_passwords  how many passwords to generate (default: 1)
+EOF
+  exit
+fi
+
+entropy="$1"
+n="${2:-1}"
+
+while [ "$n" -gt 0 ]; do
+  cat /dev/random | head -c "$((entropy/8))" | base64
+  n="$((n-1))"
+done
