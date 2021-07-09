@@ -1,0 +1,1 @@
+git clone https://github.com/jan-swiecki/scripts.git && cd scripts && ./install

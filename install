@@ -1,0 +1,6 @@
+list="$(ls . | grep -v 'install\|README')"
+
+for l in $list; do
+  sudo cp -f "$PWD/$l" "/usr/local/bin/$l"
+  echo "installed at /usr/local/bin/$l"
+done
