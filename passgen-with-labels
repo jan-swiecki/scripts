@@ -1,29 +1,40 @@
 #!/bin/bash
 
-if [ -z "$1" ]; then
-  cat<<EOF
-usage: passgen-with-labels <entropy_bits>
+bits_mapping="$(cat <<EOF
+Each 24 bits add one more character to the password length.
 
-entropy_bits         bits of entropy for the password
+Entropy bits mapped to password length:
+ 56 bits -- 10 chars
+ 72 bits -- 12 chars
+ 96 bits -- 16 chars
+124 bits -- 20 chars
+148 bits -- 24 chars
+EOF
+)"
+
+if [ "$1" == "-h" ]; then
+  cat<<EOF
+usage: passgen-with-labels [-h]
+
+Passwords are generated with /dev/urandom cut to <entropy_bits>/8
+bytes and then converted to base64. '=' equal signs padding are
+removed from trailing end. Passwords with base64 '+' are discarded
+and generated again until we get [A-Za-z0-9]+ password.
+
+This program will ask you to provide entropy bits and label for each
+password, and then it will print '\$password  \$label' to stdout.
+
+In order to finish generating password provide empty string (press enter).
+
+You can redirect stdout directly to lpr.
+
+$bits_mapping
 EOF
   exit
 fi
 
-entropy="$1"
-
-echo "Password list with ${entropy} bits of entropy"
+echo "$bits_mapping" >&2
 echo
-cat <<EOF >&2
-Input each password after 'label> ' prompt.
-
-After you provide label password will be printed in '\$password  \$label' format.
-
-In order to finish provide empty label.
-
-You can redirect stdout directly to lpr.
-
-
-EOF
 
 while [ 1 ]; do
   read -p 'label> ' label
@@ -32,12 +43,21 @@ while [ 1 ]; do
     break
   fi
 
+  read -p 'entropy bits> ' entropy_bits
+
+  if [ "$entropy_bits" == "" ]; then
+    break
+  fi
+
+
   while [ 1 ]; do
-    password="$(cat /dev/urandom | head -c "$((entropy/8))" | base64)"
+    password="$(cat /dev/urandom | head -c "$((entropy_bits/8))" | base64)"
     if [ "$password" == "${password/+/}" ]; then
       break
     fi
   done
+  
+  password="$(echo "$password" | tr -d '=')"
 
   echo "$password  $label"
   echo
