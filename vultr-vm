@@ -1,0 +1,296 @@
+#!/usr/bin/env python3
+import os
+from os import listdir
+from os.path import basename, exists, join, dirname, abspath, isfile, realpath
+import re
+import sys
+import argparse
+from shutil import copyfile
+from os.path import abspath, isfile, isdir, exists, join
+import yaml
+import hashlib
+from collections import namedtuple
+from time import sleep
+from getpass import getuser
+
+
+if sys.version_info[0] < 3:
+  raise Exception("Must be using Python 3")
+
+
+ROOT = dirname(realpath(__file__))
+CLIPBOARD_CMD = 'xclip -selection clipboard'
+CONFIG = {}
+
+colors = {
+  'header':    '\033[95m',
+  # 'white':     '\033[37m',
+  'white':     '\033[00m',
+  'blue':      '\033[94m',
+  'green':     '\033[92m',
+  'red':       '\033[91m',
+  'warning':   '\033[93m',
+  'fail':      '\033[91m',
+  'endc':      '\033[0m',
+  'bold':      '\033[1m',
+  'underline': '\033[4m'
+}
+
+class UserError(Exception):
+  pass
+
+class SystemError(Exception):
+  pass
+
+def color(name, text):
+  return f"{colors[name]}{text}{colors['endc']}"
+
+
+def named(name, source_dict):
+  return namedtuple(name, source_dict.keys())(*source_dict.values())
+
+
+def _exec(cmd):
+  exit_code = os.system(cmd)
+  if exit_code > 0:
+    raise SystemError(f"Command '{cmd}' failed with exit code: {exit_code}")
+
+
+def exec_read(cmd):
+  # print(cmd)
+  return os.popen(cmd).read()
+
+
+def search(name, regexp, input):
+  s = re.search(regexp, input)
+  return s.group(name) if s else None
+
+
+def normalize_config_disk(alias, raw):
+    key = get_key(raw['uuid'], raw['partuuid'], raw['type'])
+
+    return named('config_disk', {
+      'key': key,
+      'valid': raw['uuid'] is not None and raw['type'] is not None and raw['partuuid'] is not None,
+      'alias': alias,
+      'uuid': raw['uuid'],
+      'type': raw['type'],
+      'partuuid': raw['partuuid'],
+      'device_id': None,
+      'hdparm_info': raw['hdparm_info'],
+      'lshw_name': raw['lshw_name']
+    })
+
+  # lshw = exec_read(f"sudo lshw -class disk -short | grep '{disk_id}' | head -n 1").strip()
+
+def vultr_cli(cmd):
+  _exec(f"VULTR_API_KEY=\"{CONFIG['vultr_api_key']}\" {cmd}")
+
+def vultr_cli_read(cmd):
+  return exec_read(f"export VULTR_API_KEY=\"{CONFIG['vultr_api_key']}\"; {cmd}")
+
+def get_vultr_list(cmd):
+  rows = [plan for plan in vultr_cli_read(f"{cmd} | tr -s '\t'").split('\n') \
+    if not re.search(r"^======|^TOTAL|^[0-9]+\s*$", plan)]
+
+  head = [r.replace(' ', '_').lower() for r in rows[0].split('\t')]
+  tail = [r.split('\t') for r in rows[1:] if r.strip() != ""]
+  
+  return [dict(zip(head, plan)) for plan in tail]
+
+def get_plans():
+  return get_vultr_list("vultr plans list")
+
+def get_vms():
+  return get_vultr_list("vultr instance list")
+
+def get_oss():
+  oss = get_vultr_list("vultr os list")
+  for os in oss:
+    os['display_name'] = os['name']
+    os['name'] = os['display_name']\
+      .replace(' ', '')\
+      .replace('x64', '')\
+      .replace('i386', '_i386')\
+      .replace('.', '')\
+      .lower()
+
+    os['name'] = re.sub(r"^(debian.*?)\((.*?)\)$", "\\1", os['name'])
+
+  assert len(oss) == len(set([os['name'] for os in oss]))
+
+  return sorted(oss, key=lambda os: os['name'])
+
+
+def list_format_vultr(list_getter, columns, format):
+  # plans = get_plans()
+  print(format % columns)
+  for plan in list_getter():
+    print(format % tuple([v for k, v in plan.items()][0:len(columns)]))
+
+def list_plans():
+  list_format_vultr(
+    get_plans,
+    columns = ('id', 'vcpu_count', 'ram', 'disk', 'price_per_month'),
+    format = "%-18s %-12s %-12s %-12s %-5s"
+  )
+
+def list_oss():
+  list_format_vultr(
+    get_oss,
+    columns = ('id', 'name', 'family'),
+    format = "%-8s %-24s %-12s"
+  )
+
+def list_vms():
+  list_format_vultr(
+    get_vms,
+    columns = ('id', 'ip', 'label', 'os', 'status', 'region', 'cpu', 'ram'),
+    format = "%-38s %-18s %-16s %-16s %-10s %-10s %-8s %-12s"
+  )
+
+
+def get_first(name, get_list_callback, filter):
+  xs = [x for x in get_list_callback() if filter(x)]
+  if len(xs) == 0 or len(xs) > 1:
+    raise UserError(f"Cannot find provided {name}")
+
+  return xs[0]
+
+def create_vm(label, plan_name, os_name):
+  if label is None or label.strip() == "":
+    raise UserError("missing label argument")
+  
+  if plan_name is None or plan_name.strip() == "":
+    raise UserError("missing plan argument")
+
+  if os_name is None or os_name.strip() == "":
+    raise UserError("missing os argument")
+
+  plan = get_first('plan', get_plans, lambda plan: plan['id'] == plan_name)
+  os   = get_first('os',   get_oss,   lambda os:   os['name'] == os_name)
+  
+  if len([vm for vm in get_vms() if vm['label'] == label]) > 0:
+    raise UserError("VM with this label already exists: "+label)
+
+  stdout = vultr_cli_read(f"""
+vultr instance create \
+  --os "{os['id']}" \
+  --plan "{plan['id']}" \
+  --region "ams" \
+  --label "{label}" \
+  --ssh-keys "{CONFIG['ssh_key_id']}"
+  """)
+
+  vm_id = [search('id', r"^ID\s+(?P<id>.*)$", line) for line in stdout.split('\n') if line.startswith('ID')][0]
+
+  
+  started = False
+  vm = None
+  while not started:
+    vms = [vm for vm in get_vms() if vm['id'] == vm_id and vm['status'] == 'active']
+    started = len(vms) == 1
+    if not started:
+      print("waiting to start...")
+      sleep(1)
+    else:
+      vm = vms[0]
+
+  print(f"adding {label} to hosts")
+  hosts_line = f"{vm['ip']}  {label}.vultr"
+  _exec(f"sudo sed -ibak '#{label}\.vultr$#d' /etc/hosts")
+  _exec(f"sudo bash -c \"echo '{hosts_line}' >> /etc/hosts\"")
+  print("success")
+  print(f"you can now connect to vm with: ssh root@{label}.vultr")
+
+def destroy_vm(label):
+  if label is None or label.strip() == "":
+    raise UserError("missing label argument")
+  
+  vms = [vm for vm in get_vms() if vm['label'] == label]
+  if len(vms) == 0:
+    raise UserError("No such VM: "+label)
+
+  vm = vms[0]
+
+  yesno = input(f"Are you sure you want to destroy {vm['label']}? There is no going back. THIS ACTION IS IRREVERSIBLE.\n[y/n] ")
+
+  if yesno.lower() != "y":
+    raise UserError("Cancelling")
+
+  vultr_cli(f"vultr instance destroy {vm['id']}")
+
+  print("removing instance from /etc/hosts")
+  hosts_line = f"{vm['ip']}  {label}.vultr"
+  _exec(f"sudo sed -ibak '#^{hosts_line}$#d' /etc/hosts")
+  print("done")
+
+CONFIG_PATH = os.path.join('/home', getuser(), '.local/etc/vultr-vm.yaml')
+
+def config_exists():
+  return os.path.exists(CONFIG_PATH)
+
+def read_config():
+  assert os.path.exists(CONFIG_PATH)
+  with open(CONFIG_PATH, "r") as ymlfile:
+    return yaml.load(ymlfile)
+
+def init_config():
+  config = {
+    "vultr_api_key": input("VULTR_API_KEY> "),
+    "ssh_key_id": input("ssh_key_id> ")
+  }
+
+  os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+  
+  with open(CONFIG_PATH, 'w') as outfile:
+    yaml.dump(config, outfile, default_flow_style=False)
+
+def remove_config():
+  os.remove(CONFIG_PATH)
+
+
+if __name__ == "__main__":
+  parser = argparse.ArgumentParser()
+
+  parser.add_argument('--init', action='store_const', const=True)
+  parser.add_argument('--deinit', action='store_const', const=True)
+  parser.add_argument('--list-plans', action='store_const', const=True)
+  parser.add_argument('--list-os', action='store_const', const=True)
+  parser.add_argument('--list-vms', '-l', action='store_const', const=True)
+  parser.add_argument('--create', '-c', metavar="<name>", type=str)
+  parser.add_argument('--destroy', '-d', metavar="<name>", type=str)
+  parser.add_argument('--plan', '-p', metavar="<plan>", type=str)
+  parser.add_argument('--os', '-o', metavar="<os>", type=str, default='ubuntu2004')
+
+
+  args = parser.parse_args()
+
+  try:
+    if args.init:
+      init_config()
+      sys.exit()
+    elif args.deinit:
+      remove_config()
+      sys.exit()
+    elif not config_exists():
+      print("run 'vultr-vm --init' first")
+      sys.exit()
+
+    CONFIG = read_config()
+
+    if args.list_plans:
+      list_plans()
+    elif args.list_os:
+      list_oss()
+    elif args.list_vms:
+      list_vms()
+    elif args.create:
+      create_vm(label=args.create, plan_name=args.plan, os_name=args.os)
+    elif args.destroy:
+      destroy_vm(label=args.destroy)
+    else:
+      parser.print_help()
+  except UserError as e:
+    print(f"Error: {str(e)}")
+    sys.exit(1)

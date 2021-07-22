@@ -1,0 +1,51 @@
+#!/bin/bash
+set -eo pipefail
+
+if [ -z "$1" -o -z "$2" ]; then
+  cat<<EOF
+usage: vim-create-env <category> <venv_name>
+
+Example:
+  vim-create-env aws some_env
+  AWS_ACCESS_KEY_ID> AWS_ACCESS_KEY_ID=123
+  AWS_SECRET_ACCESS_KEY> AWS_SECRET_ACCESS_KEY=123
+  saved to ~/.aws/some_env.asc
+EOF
+  exit
+fi
+
+  lines=""
+if [ "$1" == "aws" ]; then
+  read -sp 'AWS_ACCESS_KEY_ID> ' AWS_ACCESS_KEY_ID
+  read -sp 'AWS_SECRET_ACCESS_KEY> ' AWS_SECRET_ACCESS_KEY
+
+  lines="AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+AWS_ENV=$2"
+
+elif [ "$1" == "vultr" ]; then
+  read -sp 'VULTR_API_KEY> ' VULTR_API_KEY
+
+  lines="VULTR_API_KEY=$VULTR_API_KEY
+VULTR_ENV=$1"
+
+else
+  while [ 1 ]; do
+    read -p 'line> ' line
+
+    if [ "$line" == "" ]; then
+      break
+    fi
+
+    lines="${line}\n"
+  done
+
+  if [ "$lines" == "" ]; then
+    echo "no lines provided, exiting"
+    exit 1
+  fi
+
+fi
+
+mkdir -p "$HOME/.$1"
+echo "$lines" | gpgcrypt > "$HOME/.$1/$2.asc"
