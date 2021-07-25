@@ -1,0 +1,21 @@
+#!/bin/bash
+set -eo pipefail
+
+mvn -Dmaven.test.skip=true clean compile package
+
+# version=`ls target/*.jar | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(\-[A-Za-z0-9]+)?'`
+# name=`ls target/*.jar | sed "s#-$version.*\$##" | xargs basename`
+# groupId=`cat pom.xml | grep groupId`
+
+# aptinstall libxml-xpath-perl
+
+groupId=`xpath -q -e '/project/groupId/text()' pom.xml`
+artifactId=`xpath -q -e '/project/artifactId/text()' pom.xml`
+version=`xpath -q -e '/project/version/text()' pom.xml`
+
+mvn install:install-file \
+  -Dfile=target/${artifactId}-${version}.jar \
+  -DgroupId=${groupId} \
+  -DartifactId=${artifactId} -Dversion=${version} \
+  -Dpackaging=jar \
+  -DlocalRepositoryPath=$HOME/.m2/repository
