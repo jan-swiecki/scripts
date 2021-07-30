@@ -1,0 +1,45 @@
+#!/bin/bash
+VERSION="$2"
+
+# mkdir -p "$HOME/.local/bin"
+# grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' ~/.bashrc || echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+
+set -eou pipefail
+
+cd /tmp
+set -x
+# trap "rm $5" EXIT
+rm SHA256SUM || true
+
+checksums="$4"
+bin="$3"
+
+set +o pipefail
+[ -f "$checksums" ] || wget "$1/$VERSION/$checksums"
+[ -f "$bin" ] || wget "$1/$VERSION/$bin"
+set -o pipefail
+
+if [[ "$checksums" =~ \.asc$ ]]; then
+  gpg --verify "$checksums" "$bin"
+else
+  cat "$checksums" | grep $bin >> SHA256SUM
+  sha256sum -c SHA256SUM
+fi
+
+if [ "$?" -ne 0 ]; then
+  echo "error: wrong sha25sum / gpg signature" >&2
+  exit 1
+fi
+
+if [[ "$bin" =~ \.zip$ ]]; then
+  unzip "$bin"
+  eval "$6"
+elif [[ "$bin" =~ \.tar.gz$ ]]; then
+  tar -xf "$bin"
+  eval "$6"
+else
+  chmod +x "$bin"
+  mv "$bin" "$HOME/.local/bin/$6"
+fi
+
+echo "success"

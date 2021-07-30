@@ -1,6 +1,6 @@
-list="$(ls . | grep -v 'install\|README')"
+list="$(find . -maxdepth 1 -type f | grep -v 'install\|README')"
 
 for l in $list; do
-  sudo rm "/usr/local/bin/$l"
-  echo "/usr/local/bin/$l removed"
+  sudo rm "/usr/local/bin/$(basename "$l")"
+  echo "/usr/local/bin/$(basename "$l") removed"
 done
