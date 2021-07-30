@@ -233,7 +233,7 @@ def config_exists():
 def read_config():
   assert os.path.exists(CONFIG_PATH)
   with open(CONFIG_PATH, "r") as ymlfile:
-    return yaml.load(ymlfile)
+    return yaml.safe_load(ymlfile)
 
 def init_config():
   config = {
@@ -275,7 +275,7 @@ if __name__ == "__main__":
       sys.exit()
     elif not config_exists():
       print("run 'vultr-vm --init' first")
-      sys.exit()
+      sys.exit(1)
 
     CONFIG = read_config()
 
