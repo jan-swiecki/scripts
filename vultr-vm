@@ -203,7 +203,7 @@ vultr instance create \
   print("success")
   print(f"you can now connect to vm with: ssh root@{label}.vultr")
 
-def destroy_vm(label):
+def destroy_vm(label, force=False):
   if label is None or label.strip() == "":
     raise UserError("missing label argument")
   
@@ -213,11 +213,12 @@ def destroy_vm(label):
 
   vm = vms[0]
 
-  yesno = input(f"Are you sure you want to destroy {vm['label']}? There is no going back. THIS ACTION IS IRREVERSIBLE.\n[y/n] ")
+  if not force:
+    yesno = input(f"Are you sure you want to destroy {vm['label']}? There is no going back. THIS ACTION IS IRREVERSIBLE.\n[y/n] ")
 
-  if yesno.lower() != "y":
-    raise UserError("Cancelling")
-
+    if yesno.lower() != "y":
+      raise UserError("Cancelling")
+  
   vultr_cli(f"vultr instance destroy {vm['id']}")
 
   print("removing instance from /etc/hosts")
@@ -262,6 +263,7 @@ if __name__ == "__main__":
   parser.add_argument('--destroy', '-d', metavar="<name>", type=str)
   parser.add_argument('--plan', '-p', metavar="<plan>", type=str)
   parser.add_argument('--os', '-o', metavar="<os>", type=str, default='ubuntu2004')
+  parser.add_argument('--force', '-f', action='store_const', const=True)
 
 
   args = parser.parse_args()
@@ -288,7 +290,7 @@ if __name__ == "__main__":
     elif args.create:
       create_vm(label=args.create, plan_name=args.plan, os_name=args.os)
     elif args.destroy:
-      destroy_vm(label=args.destroy)
+      destroy_vm(label=args.destroy, force=args.force)
     else:
       parser.print_help()
   except UserError as e:
