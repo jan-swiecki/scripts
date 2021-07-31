@@ -8,6 +8,6 @@ version="2.7.0"
   "vultr-cli_${version}_linux_64-bit.tar.gz" \
   "vultr-cli_v${version}_checksums.txt" \
   "vultr-cli*" \
-  "mv vultr-cli $HOME/.local/bin/vultr-cli"
+  "mv vultr-cli /usr/local/bin/vultr-cli"
 
-ln -sf "$HOME/.local/bin/vultr-cli" "$HOME/.local/bin/vultr"
+ln -sf "/usr/local/bin/vultr-cli" "/usr/local/bin/vultr"
