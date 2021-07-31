@@ -223,6 +223,18 @@ def destroy_vm(label, force=False):
   _exec(f"hosts-remove {label}.vultr")
   print("done")
 
+def get_ip_vm(label):
+  if label is None or label.strip() == "":
+    raise UserError("missing label argument")
+  
+  vms = [vm for vm in get_vms() if vm['label'] == label]
+  if len(vms) == 0:
+    raise UserError("No such VM: "+label)
+
+  vm = vms[0]
+
+  print(vm['ip'])
+
 CONFIG_PATH = os.path.join('/home', getuser(), '.local/etc/vultr-vm.yaml')
 
 def config_exists():
@@ -258,6 +270,7 @@ if __name__ == "__main__":
   parser.add_argument('--list-vms', '-l', action='store_const', const=True)
   parser.add_argument('--create', '-c', metavar="<name>", type=str)
   parser.add_argument('--destroy', '-d', metavar="<name>", type=str)
+  parser.add_argument('--get-ip', metavar="<name>", type=str)
   parser.add_argument('--plan', '-p', metavar="<plan>", type=str)
   parser.add_argument('--os', '-o', metavar="<os>", type=str, default='ubuntu2004')
   parser.add_argument('--force', '-f', action='store_const', const=True)
@@ -288,6 +301,8 @@ if __name__ == "__main__":
       create_vm(label=args.create, plan_name=args.plan, os_name=args.os)
     elif args.destroy:
       destroy_vm(label=args.destroy, force=args.force)
+    elif args.get_ip:
+      get_ip_vm(label=args.get_ip)
     else:
       parser.print_help()
   except UserError as e:
