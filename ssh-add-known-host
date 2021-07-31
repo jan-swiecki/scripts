@@ -1,0 +1,85 @@
+#!/bin/bash
+set -eo pipefail
+
+if [ -z "$1" -a -z "$2" -a -z "$3" ]; then
+  cat<<EOF
+usage: ssh-add-known-host <host> <type> <fingerprint> [<username>]
+
+Add ssh host based on know sha256 fingerprint, e.g. taken from host website.
+
+This is useful in server provisioning automation where you can hardcore
+host fingerprint within provisioning scripts, so you can be safe in case
+of mitm attacks.
+
+Add <username> argument to check if connection is working without fingerprint prompt.
+
+Example: Add Github ssh known host
+https://docs.github.com/en/github/authenticating-to-github/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints
+
+  ssh-keygen -R github.com
+  ssh-keygen -R "\$(dig +short github.com)"
+  ssh-add-known-host github.com rsa SHA256:nThbg6kXUpJWGl7E1IGOCspRomTxdCARLviKw6E5SY8 git
+  ssh-add-known-host github.com dsa SHA256:br9IjFspm1vxR3iA35FWE+4VTyz1hYVLIE2t1/CeyWQ git
+  ssh -T github.com
+
+EOF
+  exit
+fi
+
+host="$1"
+type="$2"
+fingerprint="${3/SHA256:/}"
+username="$4"
+
+{ echo "$3" | grep -qP '^SHA256:'; } || {
+  echo "[ERROR] Only SHA256 fingerprints are currently supported"
+  exit 1
+}
+
+if [ "$type" == "rsa" ]; then
+  algo=rsa-sha2-256
+elif [ "$type" == "dsa" ]; then
+  # algo=ecdsa-sha2-nistp256-cert-v01@openssh.com
+  algo=ssh-dss
+else
+  echo "[ERROR] $type is currently not supported"
+fi
+
+ssh-keyscan -t "$type" "$host" 2>/dev/null > new_host_line
+
+# https://whatsecurity.nl/verifying_ssh_fingerprints_in_new_form.html
+actual_fingerprint=`cat new_host_line \
+  | awk '{ print $3; }' \
+  | base64 -d \
+  | sha256sum \
+  | awk '{ print $1; }' \
+  | xxd -r -p \
+  | base64 \
+  | rev \
+  | cut -c 2- \
+  | rev`
+
+[ "$actual_fingerprint" == "$fingerprint" ] && echo "[  OK ] Fingerprints match" || {
+  echo "[ERROR] Fingerprints don't match! (type: $type)"
+  echo "  Provided fingerprint: $fingerprint"
+  echo "  Server fingerprint:   $actual_fingerprint"
+  exit 1
+}
+
+# ssh-keygen -R "$host" >/dev/null 2>&1
+# ssh-keygen -R "$(dig +short "$host")" >/dev/null 2>&1
+
+cat new_host_line >> ~/.ssh/known_hosts
+rm new_host_line
+echo "[  OK ] Host $host added to known_hosts"
+
+if [ ! -z "$username" ]; then
+  ssh_check_cmd="ssh -o HostKeyAlgorithms=$algo -o StrictHostKeyChecking=yes -vT ${username}@${host}"
+  
+  if [ `$ssh_check_cmd 2>&1 | tee /tmp/ssh-add-known-host.log | grep 'Authentication succeeded' | wc -l` == 1 ]; then
+    echo "[  OK ] Connection successful!"
+  else
+    echo "[ERROR] Cannot connect: $(cat /tmp/ssh-add-known-host.log)"
+    exit 1
+  fi
+fi

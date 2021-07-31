@@ -6,3 +6,7 @@ for l in $list; do
   "./$l"
   echo "$(basename "$l") installed"
 done
+
+# hosts scripts
+apt-get update
+apt-get install -y net-tools

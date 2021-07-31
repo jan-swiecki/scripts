@@ -37,6 +37,7 @@ else
   echo -n "hosts-remove: Removing host '$host' from /etc/hosts ... "
   sudo mv /tmp/hosts-remove-tmp /etc/hosts
   
+  sleep 2
   if hosts-entry-exists "$host"; then
     echo "ERROR"
     echo "error: host '$host' doesn't seem to be removed! Check yourself with 'arp -n $host' command." >&2
