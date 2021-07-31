@@ -1,0 +1,47 @@
+#!/bin/bash
+set -eo pipefail
+
+if [ -z "$1" ]; then
+  cat<<EOF
+usage: hosts-remove <host>
+
+Removes <host> host line from /etc/hosts.
+
+Example:
+  $ cat /etc/hosts | grep my-host
+  127.0.0.1      my-host # some comment
+  $ hosts-remove 127.0.0.1 my-host
+  $ cat /etc/hosts | grep my-host | wc -l
+  0
+
+Note:
+  Before each operation /etc/hosts is backed up in /etc/hosts.bak
+  and /tmp/hosts.bak.<date>.
+EOF
+  exit
+fi
+
+host="$1"
+
+if ! hosts-entry-exists "$host"; then
+  echo "warning: Host '$host' not found in /etc/hosts"
+  echo "warning: Doing nothing"
+  exit
+fi
+
+hosts-backup
+grep -vP "^.*?\s+${host//\./\\.}\s*(?:#.*$|$)" /etc/hosts > /tmp/hosts-remove-tmp
+if [ "$(cat /etc/hosts | wc -l)" == "$(cat /tmp/hosts-remove-tmp | wc -l )" ]; then
+  echo "hosts-remove: No lines matched, doing nothing"
+else
+  echo -n "hosts-remove: Removing host '$host' from /etc/hosts ... "
+  sudo mv /tmp/hosts-remove-tmp /etc/hosts
+  
+  if hosts-entry-exists "$host"; then
+    echo "ERROR"
+    echo "error: host '$host' doesn't seem to be removed! Check yourself with 'arp -n $host' command." >&2
+    exit 1
+  else
+    echo "OK"
+  fi
+fi

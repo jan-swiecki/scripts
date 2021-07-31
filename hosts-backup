@@ -1,0 +1,7 @@
+#!/bin/bash
+set -eo pipefail
+
+bak="/tmp/hosts.bak.$(date -Iseconds)"
+sudo cp /etc/hosts /etc/hosts.bak
+sudo cp /etc/hosts "$bak"
+echo "hosts-backup: /etc/hosts file was backed up in /etc/hosts.bak and $bak"

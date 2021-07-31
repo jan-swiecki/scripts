@@ -1,0 +1,47 @@
+#!/bin/bash
+set -eo pipefail
+
+regex="^[a-z0-9\.\-]+$"
+
+verbose=0
+if [ "$1" == "-v" ]; then
+  verbose=1
+  host="$2"
+elif [ "$2" == "-v" ]; then
+  verbose=1
+  host="$1"
+else
+  host="$1"
+fi
+
+
+if [ -z "$host" ]; then
+  cat<<EOF
+usage: hostname-validate [-v] <hostname>
+
+Validates hostname with /$regex/.
+
+Options:
+  -v  verbose
+
+Note:
+  This is not RFC compliant domain validation.
+  This scripts is intended for local hostnames used in /etc/hosts.
+
+  See https://stackoverflow.com/q/106179/1637178 for more discussion.
+EOF
+  exit
+fi
+
+
+echo_ () {
+  if [ "$verbose" == "1" ]; then
+    echo "$1"
+  fi
+}
+
+
+{ echo "$host" | grep -P "$regex" >/dev/null; } && echo_ "valid hostname" || {
+  echo_ "invalid hostname"
+  exit 1
+}

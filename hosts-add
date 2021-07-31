@@ -1,0 +1,45 @@
+#!/bin/bash
+set -eo pipefail
+
+if [ -z "$1" -a -z "$2" ]; then
+  cat<<EOF
+usage: hosts-add <ip> <host>
+
+Adds '<ip>  <host>' line to /etc/hosts.
+
+Note:
+  Script removes all duplicate lines from /etc/hosts,
+  so no duplicates are possible, but it will remove other duplicate lines too,
+  including empty lines.
+
+Note:
+  Before each operation /etc/hosts is backed up in /etc/hosts.bak
+  and /tmp/hosts.bak.<date>.
+EOF
+  exit
+fi
+
+ip="$1"
+host="$2"
+
+ip route get "$ip" >/dev/null 2>&1 || {
+  echo "error: invalid ip address: $ip" >&2
+  exit 1
+}
+
+if hosts-entry-exists "$host"; then
+  # hosts-remove will run backup, so we don't need to run it here
+  hosts-remove "$host"
+else
+  hosts-backup
+fi
+
+# add host
+sudo bash -c "echo '${ip}  ${host}' >> /etc/hosts"
+
+echo "hosts-add: Added '${ip}  ${host}' to /etc/hosts"
+
+if ! hosts-entry-exists "$host"; then
+  echo "error: Cannot find host '$host' in hosts. Check yourself with 'arp -n $host' command." >&2
+  exit 1
+fi
