@@ -198,9 +198,7 @@ vultr instance create \
 
   print(f"adding {label} to hosts")
   hosts_line = f"{vm['ip']}  {label}.vultr"
-  _exec(f"sudo sed -ibak '#{label}\.vultr$#d' /etc/hosts")
-  _exec(f"sudo bash -c \"echo '{hosts_line}' >> /etc/hosts\"")
-  print("success")
+  _exec(f"hosts-add {vm['ip']} {label}.vultr")
   print(f"you can now connect to vm with: ssh root@{label}.vultr")
 
 def destroy_vm(label, force=False):
@@ -222,8 +220,7 @@ def destroy_vm(label, force=False):
   vultr_cli(f"vultr instance destroy {vm['id']}")
 
   print("removing instance from /etc/hosts")
-  hosts_line = f"{vm['ip']}  {label}.vultr"
-  _exec(f"sudo sed -ibak '#^{hosts_line}$#d' /etc/hosts")
+  _exec(f"hosts-remove {label}.vultr")
   print("done")
 
 CONFIG_PATH = os.path.join('/home', getuser(), '.local/etc/vultr-vm.yaml')
