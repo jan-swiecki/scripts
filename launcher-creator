@@ -1,0 +1,71 @@
+#!/bin/bash
+TERMINAL=false
+
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+  key="$1"
+
+  case $key in
+    -n|--name)
+      NAME="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    -I|--icon)
+      ICON_PATH="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    -s|--script)
+      SCRIPT_PATH="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --terminal)
+      TERMINAL=true
+      shift # past argument
+      ;;
+    *)    # unknown option
+      POSITIONAL+=("$1") # save it in an array for later
+      shift # past argument
+      ;;
+  esac
+done
+
+set -- "${POSITIONAL[@]}" # restore positional parameters
+
+usage () {
+  cat <<EOF
+usage: launcher-creator --name <name> --icon <path_to_icon> --script <path_to_script> [--terminal]
+
+This will generate (~/.local/share/applications/\$name.desktop):
+  [Desktop Entry]
+  Type=Application
+  Terminal=$terminal (true/false)
+  Name=\$name
+  Icon=\$icon
+  Exec=\$script
+EOF
+}
+
+[ -z "$NAME" ] && usage && exit 1
+[ -z "$ICON_PATH" ] && usage && exit 1
+[ -z "$SCRIPT_PATH" ] && usage && exit 1
+
+set -eou pipefail
+
+base=~/.local/share/applications
+lname="$(echo "$NAME" | tr '[:upper:]' '[:lower:]')"
+target="$base/${lname}.desktop"
+
+cat <<EOF > "$target"
+[Desktop Entry]
+Type=Application
+Terminal=$TERMINAL
+Name=$NAME
+Icon=$ICON_PATH
+Exec=$SCRIPT_PATH
+EOF
+
+echo "Created: $target"
+echo "Success"
