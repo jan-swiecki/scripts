@@ -1,7 +1,7 @@
 #!/bin/bash
 set -eo pipefail
 
-version="2.7.0"
+version="2.12.0"
 ./_install_github_release \
   "https://github.com/vultr/vultr-cli/releases/download" \
   "v${version}" \
