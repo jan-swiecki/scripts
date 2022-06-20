@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -eou pipefail
+
+ssh_args=()
+
+while [[ "$#" -gt 0 ]]; do
+  case $1 in
+    --) BIND_HOST="$2"; shift ;;
+    *) ssh_args+=("$1") ;;
+  esac
+  shift
+done
+
+if [[ -z $BIND_HOST ]] || [[ $BIND_HOST = "" ]]; then
+  echo "Usage: tunnelier ...SSH_OPTS -- BIND_HOSTNAME" >&2
+  exit 1
+fi
+
+clean() {
+  hosts-remove "$BIND_HOST"
+}
+
+
+trap clean EXIT
+set -x
+
+hosts-add 127.0.0.1 "$BIND_HOST"
+ssh "${ssh_args[@]}"
