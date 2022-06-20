@@ -49,6 +49,7 @@ def show_gitconfig():
 
 def gitconfig_sync(cfg: ConfigFile):
   user = cfg.load().config.current_user()
+  print(f'user={user}')
   if user is None:
     os.system('git config --global --unset user.name')
     os.system('git config --global --unset user.email')
@@ -56,9 +57,9 @@ def gitconfig_sync(cfg: ConfigFile):
 
     show_gitconfig()
   else:
-    execute_cmd(['git config --global --set user.name'].split(' ') + [user.name])
-    execute_cmd(['git config --global --set user.email'].split(' ') + [user.email])
-    print('git config user set to: '+user)
+    execute_cmd('git config --global user.name'.split(' ') + [user.name])
+    execute_cmd('git config --global user.email'.split(' ') + [user.email])
+    print('git config user set to: '+str(user))
 
     show_gitconfig()
 
@@ -182,8 +183,10 @@ class Config(yaml.YAMLObject):
     if fuser is not None:
       for email, u in self.envs.items():
         self.envs[email] = u.not_current() if fuser.email != email else u.current()
+      self.current = fuser.email
       return fuser
     else:
+      self.current = None
       return None
 
   def list_users(self) -> List[User]:
