@@ -1,0 +1,299 @@
+#!/usr/bin/env python3
+"""
+Handles multiple git users.
+"""
+from __future__ import annotations
+import argparse
+from dataclasses import dataclass
+import functools
+from genericpath import exists
+import os
+from pathlib import Path
+from posixpath import join, realpath
+from re import S
+import subprocess
+import sys
+from typing import IO, Dict, List
+from email import utils
+
+import yaml
+
+
+#############
+### UTILS ###
+#############
+def execute_cmd(cmd, cwd=None, capture_output=False):
+  ret = subprocess.run(
+    cmd,
+    cwd=cwd,
+    capture_output=capture_output
+  )
+
+  if ret.stderr:
+    print(f'STDERR: {ret.stderr}', file=sys.stderr, flush=True)
+
+  if ret.returncode > 0:
+    raise Exception(f'Script returned non-zero exit code: {ret.returncode}')
+
+  return ret.stdout
+
+#######################
+### GIT CONFIG SYNC ###
+#######################
+def show_gitconfig():
+  print('`git config --global --get user.name` --> ', end='', flush=True)
+  os.system('git config --global --get user.name || echo "[no value]"')
+
+  print('`git config --global --get user.email` --> ', end='', flush=True)
+  os.system('git config --global --get user.email || echo "[no value]"')
+
+def gitconfig_sync(cfg: ConfigFile):
+  user = cfg.load().config.current_user()
+  if user is None:
+    os.system('git config --global --unset user.name')
+    os.system('git config --global --unset user.email')
+    print('(removed user from gitconfig)')
+
+    show_gitconfig()
+  else:
+    execute_cmd(['git config --global --set user.name'].split(' ') + [user.name])
+    execute_cmd(['git config --global --set user.email'].split(' ') + [user.email])
+    print('git config user set to: '+user)
+
+    show_gitconfig()
+
+
+#######################
+### ARGUMENT PARSER ###
+#######################
+class DefaultHelpParser(argparse.ArgumentParser):
+  suffix_doc: str | None
+
+  def __init__(self, *args, suffix_doc: str | None = None, **kwargs):
+    kwargs['formatter_class'] = argparse.RawTextHelpFormatter
+    # kwargs['description'] = kwargs['description']
+    super().__init__(*args, **kwargs)
+
+    self.suffix_doc = suffix_doc
+    # self._positionals.title = 'Arguments'
+    
+  def error(self, message):
+    sys.stderr.write('error: %s\n' % message)
+    self.print_help()
+    sys.exit(2)
+
+  def print_help(self, file: IO[str] | None = None) -> None:
+    super().print_help(file)
+    if self.suffix_doc is not None:
+      print(self.suffix_doc)
+    
+
+suffix_doc = """
+EXAMPLES
+  Add new env:
+    gitenv add 'John Smith <jsmith@example.org>'
+
+  Remove env:
+    gitenv remove jsmith@example.org
+
+  Use env:
+    gitenv use jsmith@example.org
+
+  List envs:
+    $ gitenv list
+    John Smith <jsmith@example.org>
+    Lena Kowalska <lena.kowalska@outlook.com>
+
+  Show env:
+    $ gitenv show jsmith@example.org
+    John Smith <jsmith@example.org>
+"""
+
+parser = DefaultHelpParser(description=__doc__, suffix_doc=suffix_doc)
+# parser.add_argument('command')
+
+sub = parser.add_subparsers(dest='cmd', required=True, metavar="COMMAND")
+add: argparse.ArgumentParser = sub.add_parser('add', help="Create new git env")
+show: argparse.ArgumentParser = sub.add_parser('show', help="Print git env")
+use: argparse.ArgumentParser = sub.add_parser('use', help="Set current git env")
+remove: argparse.ArgumentParser = sub.add_parser('remove', help="Remove git env")
+list: argparse.ArgumentParser = sub.add_parser('list', help="List git envs")
+drop: argparse.ArgumentParser = sub.add_parser('drop-all', help="Remove all saved envs")
+cat: argparse.ArgumentParser = sub.add_parser('cat', help="Print raw config")
+current: argparse.ArgumentParser = sub.add_parser('current', help="Show currently used gitenv")
+
+
+add.add_argument('name', metavar='NAME', type=str, help='RFC 5322 compliant address (e.g. "John Smith <jsmith@example.org>")')
+show.add_argument('email', metavar='EMAIL', type=str)
+use.add_argument('searchtext', metavar='EMAIL_OR_SEARCHTEXT', type=str)
+
+##############
+### CONFIG ###
+##############
+
+Email = str
+
+class Config(yaml.YAMLObject):
+  yaml_loader = yaml.Loader
+  yaml_tag = u'!Config'
+
+  envs: Dict[str, User]
+  current: str | None
+
+  def __init__(self, envs: dict[str, User] = None, current: str = None) -> None:
+    super().__init__()
+    self.envs = envs or dict()
+    self.current = current or None
+
+  def add_user(self, name, email: Email):
+    self.envs[email] = User(name=name, email=email, is_current=False)
+
+  def remove_user(self, email: Email):
+    if email in self.envs:
+      if self.current == email:
+        self.current = None
+      del self.envs[email]
+    else:
+      raise Exception('No such env: '+email)
+
+  def get_user(self, email: Email) -> User | None:
+    if email in self.envs:
+      return self.envs[email]
+    else:
+      return None
+
+  def current_user(self) -> User | None:
+    if self.current and self.current in self.envs:
+      return self.envs[self.current]
+    else:
+      return None
+
+  def _find(self, searchtext: str) -> User | None:
+    xs = [u for email, u in self.envs.items() if searchtext in email]
+    if len(xs) == 0:
+      return None
+    elif len(xs) > 1:
+      error_exit(f'More than one user found: {", ".join(xs)}')
+    else:
+      return xs[0]
+
+  def set_current_user(self, searchtext: str) -> User | None:
+    fuser = self._find(searchtext)
+    if fuser is not None:
+      for email, u in self.envs.items():
+        self.envs[email] = u.not_current() if fuser.email != email else u.current()
+      return fuser
+    else:
+      return None
+
+  def list_users(self) -> List[User]:
+    return self.envs.values()
+
+@dataclass
+class User(yaml.YAMLObject):
+  yaml_loader = yaml.Loader
+  yaml_tag = u'!User'
+
+  name: str
+  email: Email
+  is_current: bool
+  
+  def __repr__(self) -> str:
+    # return "%sname = %s, email = %s" % ('* ' if self.is_current else '', self.name, self.email)
+    return "%s%s (%s)" % ('*' if self.is_current else '', self.email, self.name)
+
+  def current(self) -> User:
+    return User(name=self.name, email=self.email, is_current=True)
+
+  def not_current(self) -> User:
+    return User(name=self.name, email=self.email, is_current=False)
+
+class ConfigFile:
+  dirpath: str
+  filepath: str
+
+  config: Config
+
+  def __init__(self) -> None:
+    self.dirpath = realpath(join(os.getenv('HOME'), '.config', 'gitenv'))
+    os.makedirs(self.dirpath, exist_ok=True)
+    self.filepath = join(self.dirpath, 'conf.yaml')
+
+  def save(self):
+    # print(yaml.dump(self.config))
+    with open(self.filepath, 'w') as f:
+      yaml.dump(self.config, f)
+    # self.config.to_yaml
+
+  def remove(self):
+    if exists(self.filepath):
+      os.unlink(self.filepath)
+    else:
+      print("Config doesn't exists")
+
+  def print_conf(self):
+    if exists(self.filepath):
+      print(Path(self.filepath).read_text())
+    else:
+      print("Config doesn't exists")
+
+  def load(self) -> ConfigFile:
+    if exists(self.filepath):
+      with open(self.filepath) as f:
+        self.config = yaml.load(f, Loader=yaml.Loader)
+    else:
+      self.config = Config()
+      self.config.envs = dict()
+
+    return self
+
+
+def error_exit(msg: str) -> None:
+  print(msg, file=sys.stderr, flush=True)
+  sys.exit(1)
+
+
+cfg = ConfigFile()
+args = parser.parse_args()
+if args.cmd == 'add':
+  cfg.load()
+  name, email = utils.parseaddr(args.name)
+  assert name != '', 'must provide name'
+  assert email != '', 'must provide email'
+  cfg.config.add_user(name, email)
+  cfg.save()
+elif args.cmd == 'show':
+  cfg.load()
+  email = args.email
+  user = cfg.config.get_user(email)
+  if user is not None:
+    print(user)
+  else:
+    print('gitenv not found')
+    sys.exit(1)
+elif args.cmd == 'list':
+  cfg.load()
+  for user in cfg.config.list_users():
+    print(user)
+elif args.cmd == 'remove':
+  cfg.load()
+  cfg.config.remove_user(args.email)
+  cfg.save()
+  gitconfig_sync(cfg=cfg)
+elif args.cmd == 'drop-all':
+  cfg.remove()
+  gitconfig_sync(cfg=cfg)
+elif args.cmd == 'use':
+  cfg.load()
+  user = cfg.config.set_current_user(args.searchtext)
+  print(user) if user is not None else error_exit('No such user')
+  cfg.save()
+  gitconfig_sync(cfg=cfg)
+elif args.cmd == 'cat':
+  cfg.print_conf()
+elif args.cmd == 'current':
+  cfg.load()
+  user = cfg.config.current_user()
+  print(user) if user is not None else error_exit('No current user selected')
+else:
+  raise Exception(f'unknown command: {args.cmd}')
