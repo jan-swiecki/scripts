@@ -747,6 +747,11 @@ search_desktop_file()
     local dir="$2"
     local target="$3"
 
+    vscode_goto=0
+    if [ "$default" = "code.desktop" ] && echo "$target" | grep -qE ':[0-9]+([0-9]+)$'; then
+        vscode_goto=1
+    fi
+
     local file=""
     # look for both vendor-app.desktop, vendor/app.desktop
     if [ -r "$dir/$default" ]; then
@@ -763,12 +768,18 @@ search_desktop_file()
         # http://standards.freedesktop.org/desktop-entry-spec/latest/ar01s04.html
         localised_name="$(get_key "${file}" "Name")"
         set -- $(get_key "${file}" "Exec" | last_word)
+
+        if [ "$vscode_goto" -eq 1 ]; then
+            set -- "$@" "--goto"
+        fi
+
         # We need to replace any occurrence of "%f", "%F" and
         # the like by the target file. We examine each
         # argument and append the modified argument to the
         # end then shift.
         local args=$#
         local replaced=0
+        
         while [ $args -gt 0 ]; do
             case $1 in
                 %[c])
@@ -813,6 +824,7 @@ search_desktop_file()
 open_generic_xdg_mime()
 {
     filetype="$2"
+    
     default=`xdg-mime query default "$filetype"`
     if [ -n "$default" ] ; then
         xdg_user_dir="$XDG_DATA_HOME"
@@ -878,13 +890,21 @@ open_envvar()
 open_generic()
 {
     if is_file_url_or_path "$1"; then
-        local file="$(file_url_to_path "$1")"
+        local line_numbers
+        if echo "$1" | grep -qE ':[0-9]+([0-9]+)$'; then
+            line_numbers=$(echo "$1" | grep -oE ':[0-9]+(:[0-9]+)$')
+            pathname=$(echo "$1" | sed -E 's/:[0-9]+(:[0-9]+)$//')
+        else
+            pathname="$1"
+        fi
 
+        local file="$(file_url_to_path "$pathname")"
+	    
         check_input_file "$file"
 
         if has_display; then
             filetype=`xdg-mime query filetype "$file" | sed "s/;.*//"`
-            open_generic_xdg_mime "$file" "$filetype"
+            open_generic_xdg_mime "$file${line_numbers}" "$filetype"
         fi
 
         if which run-mailcap 2>/dev/null 1>&2; then
