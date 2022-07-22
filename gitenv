@@ -13,7 +13,7 @@ from posixpath import join, realpath
 from re import S
 import subprocess
 import sys
-from typing import IO, Dict, List
+from typing import IO, Dict, List, Tuple
 from email import utils
 
 import yaml
@@ -113,8 +113,10 @@ EXAMPLES
 parser = DefaultHelpParser(description=__doc__, suffix_doc=suffix_doc)
 # parser.add_argument('command')
 
-sub = parser.add_subparsers(dest='cmd', required=True, metavar="COMMAND")
+sub: argparse._SubParsersAction = parser.add_subparsers(dest='cmd', required=True, metavar="COMMAND")
 add: argparse.ArgumentParser = sub.add_parser('add', help="Create new git env")
+env_file_create: argparse.ArgumentParser = sub.add_parser('env_file_create', help="Create .gitenv file in git root of current repository")
+env_file_get: argparse.ArgumentParser = sub.add_parser('env_file_get', help="Print sourcable GIT_AUTHOR_* into stdout")
 show: argparse.ArgumentParser = sub.add_parser('show', help="Print git env")
 use: argparse.ArgumentParser = sub.add_parser('use', help="Set current git env")
 remove: argparse.ArgumentParser = sub.add_parser('remove', help="Remove git env")
@@ -123,10 +125,13 @@ drop: argparse.ArgumentParser = sub.add_parser('drop-all', help="Remove all save
 cat: argparse.ArgumentParser = sub.add_parser('cat', help="Print raw config")
 current: argparse.ArgumentParser = sub.add_parser('current', help="Show currently used gitenv")
 
-
 add.add_argument('name', metavar='NAME', type=str, help='RFC 5322 compliant address (e.g. "John Smith <jsmith@example.org>")')
 show.add_argument('email', metavar='EMAIL', type=str)
 use.add_argument('searchtext', metavar='EMAIL_OR_SEARCHTEXT', type=str)
+
+env_file_create.add_argument('name', type=str, metavar='NAME', help='RFC 5322 compliant address (e.g. "John Smith <jsmith@example.org>")')
+
+
 
 ##############
 ### CONFIG ###
@@ -250,19 +255,92 @@ class ConfigFile:
 
     return self
 
+@dataclass
+class GitEnvFile:
+  name: str
+  email: str
+
+  def print_source(self):
+    shell = Path(os.getenv('SHELL', '/usr/bin/bash')).name
+
+    if shell == 'bash' or shell == 'zsh':
+      print("# detected bash/zsh shell")
+      print(f'export GIT_AUTHOR_NAME="{self.name}"')
+      print(f'export GIT_AUTHOR_EMAIL="{self.email}"')
+    elif shell == 'fish':
+      print("# detected fish shell")
+      print(f'set -xg GIT_AUTHOR_NAME "{self.name}"')
+      print(f'set -xg GIT_AUTHOR_EMAIL "{self.email}"')
+    else:
+      error_exit(f'Unsupported shell: {shell}')
+
+  @staticmethod
+  def load_from_current_repo() -> GitEnvFile | None:
+    path = GitEnvFile._get_gitrepo_path()
+    return GitEnvFile._load(path)
+      
+  @staticmethod
+  def create_in_current_git_repo(rfc_name: str):
+    path = GitEnvFile._get_gitrepo_path()
+    GitEnvFile._save(rfc_name, path)
+    print(f'(saved in {str(path)})')
+
+  @staticmethod
+  def _load(pathname: str) -> GitEnvFile | None:
+    envfile: Path = Path(pathname) if isinstance(pathname, str) else pathname
+    if envfile.exists():
+      name, email = load_rfc_name_email(envfile.read_text())
+      return GitEnvFile(name=name, email=email)
+    else:
+      return None
+
+  @staticmethod
+  def _save(rfc_name: str, pathname: str | Path):
+    # validate if it loads
+    load_rfc_name_email(rfc_name)
+
+    envfile: Path = Path(pathname) if isinstance(pathname, str) else pathname
+    if envfile.exists(): error_exit('envfile already exists in '+str(pathname)+', remove it first')
+
+    envfile.write_text(rfc_name)
+
+  @staticmethod
+  def _get_gitrepo_path() -> Path:
+    root_dir = execute_get('git rev-parse --show-toplevel'.split(' ')).decode('utf8').strip()
+    if not root_dir: error_exit('Not in git repository')
+      
+    return Path(root_dir).resolve().joinpath('.gitenv')
+
+def load_rfc_name_email(rfc_name: str) -> Tuple[str, str]:
+  name, email = utils.parseaddr(rfc_name)
+  assert name != '', 'must provide name'
+  assert email != '', 'must provide email'
+  return name,email
 
 def error_exit(msg: str) -> None:
   print(msg, file=sys.stderr, flush=True)
   sys.exit(1)
 
+def execute_get(cmd, cwd=None):
+  ret = subprocess.run(
+    cmd,
+    cwd=cwd,
+    capture_output=True
+  )
+
+  if ret.stderr:
+    print(f'STDERR: {ret.stderr}', file=sys.stderr, flush=True)
+
+  if ret.returncode > 0:
+    raise Exception(f'Script returned non-zero exit code: {ret.returncode}')
+
+  return ret.stdout
 
 cfg = ConfigFile()
 args = parser.parse_args()
 if args.cmd == 'add':
   cfg.load()
-  name, email = utils.parseaddr(args.name)
-  assert name != '', 'must provide name'
-  assert email != '', 'must provide email'
+  name, email = load_rfc_name_email(args.name)
   cfg.config.add_user(name, email)
   cfg.save()
 elif args.cmd == 'show':
@@ -298,5 +376,12 @@ elif args.cmd == 'current':
   cfg.load()
   user = cfg.config.current_user()
   print(user) if user is not None else error_exit('No current user selected')
+elif args.cmd == 'env_file_create':
+  GitEnvFile.create_in_current_git_repo(args.name)
+elif args.cmd == 'env_file_get':
+  git_env_file = GitEnvFile.load_from_current_repo()
+  if not git_env_file: error_exit('.gitenv file not found')
+  assert git_env_file
+  git_env_file.print_source()
 else:
   raise Exception(f'unknown command: {args.cmd}')
